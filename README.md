@@ -15,7 +15,8 @@ The application allows users to analyze how the Average Number of Probes changes
 
 Deployed Application
 [https://pba-at-kgr.streamlit.app/]
-🛠️ Project Structure and File Breakdown
+
+Project Structure and File Breakdown
 The project follows a decoupled architecture, separating the core computational engine from the visualization layer.
 | File Name | Role & Description |
 |---|---|
@@ -23,7 +24,8 @@ The project follows a decoupled architecture, separating the core computational 
 | app.py | Streamlit Application. Reads the CSV data, handles user filters, and renders the interactive Plotly graphs. |
 | results_data.csv | Pre-Generated Data. The static data file containing the performance output from the C simulation (used for deployment). |
 | requirements.txt | Lists the necessary Python packages (streamlit, pandas, plotly). |
-⚙️ Local Setup and Data Regeneration
+
+Local Setup and Data Regeneration
 To run the application locally or regenerate the performance data, follow these steps.
 1. Prerequisites
 You must have a C compiler (like GCC) and Python 3 installed.
