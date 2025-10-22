@@ -31,7 +31,7 @@ st.set_page_config(
 )
 
 # Title and Description
-st.title("🧮 Dynamic Hash Table Analyzer")
+st.title(" Dynamic Hash Table Analyzer")
 st.markdown("Visualize how different collision resolution techniques perform under varying **load factors** and **data distributions** based on C simulation results.")
 
 # Load the data once
