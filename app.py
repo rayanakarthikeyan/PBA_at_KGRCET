@@ -8,7 +8,7 @@ st.set_page_config(layout="wide", page_title="Dynamic Hash Table Analyzer")
 
 # Column Definitions for robust CSV loading
 ALL_COLS = [
-    'Key_Index', 'Load_Factor', 'Distribution',
+    'Key_Index', 'Load_Factor', 'Scale', 'Distribution',
     'Chaining_Probes', 'Linear_Probing_Probes', 'Quadratic_Probing_Probes', 'Double_Hashing_Probes',
     'Chaining_Time_ms', 'Linear_Probing_Time_ms', 'Quadratic_Probing_Time_ms', 'Double_Hashing_Time_ms'
 ]
@@ -50,7 +50,7 @@ def load_data():
 
     # --- Reshape Probe Data ---
     df_probes = df.melt(
-        id_vars=['Distribution', 'Load_Factor', 'Key_Index'],
+        id_vars=['Scale', 'Distribution', 'Load_Factor', 'Key_Index'],
         value_vars=PROBE_COLS,
         var_name='Technique_Raw',
         value_name='Metric_Value'
@@ -58,7 +58,7 @@ def load_data():
 
     # --- Reshape Timing Data ---
     df_time = df.melt(
-        id_vars=['Distribution', 'Load_Factor', 'Key_Index'],
+        id_vars=['Scale', 'Distribution', 'Load_Factor', 'Key_Index'],
         value_vars=TIME_COLS,
         var_name='Technique_Raw',
         value_name='Metric_Value'
@@ -79,9 +79,19 @@ df = load_data()
 
 st.sidebar.header("Analysis Filters")
 
+# Filter 0: Scale Selector (NEW)
+selected_scale = st.sidebar.radio(
+    "1. Select Simulation Scale",
+    ('Macro (10k keys)', 'Micro (≤10 keys)'),
+    horizontal=True,
+    help="Macro scale shows real-world performance; Micro scale shows single-key collision effects."
+)
+scale_filter = 'Macro' if 'Macro' in selected_scale else 'Micro'
+
+
 # Filter 1: Select Metric Type
 selected_metric_type = st.sidebar.radio(
-    "1. Select Analysis Type",
+    "2. Select Analysis Metric",
     ('Total Probes', 'Insertion Time (ms)'),
     horizontal=True
 )
@@ -89,7 +99,7 @@ selected_metric_type = st.sidebar.radio(
 # Filter 2: Select Distribution
 available_distributions = df['Distribution'].unique()
 selected_distributions = st.sidebar.multiselect(
-    "2. Select Data Distribution(s)",
+    "3. Select Data Distribution(s)",
     available_distributions,
     default=available_distributions
 )
@@ -97,14 +107,14 @@ selected_distributions = st.sidebar.multiselect(
 # Filter 3: Select Technique
 available_techniques = df['Technique'].unique()
 selected_techniques = st.sidebar.multiselect(
-    "3. Select Collision Technique(s)",
+    "4. Select Collision Technique(s)",
     available_techniques,
     default=available_techniques
 )
 
 # Filter 4: Load Factor Range
 max_load_factor = st.sidebar.slider(
-    "4. Max Load Factor (α)",
+    "5. Max Load Factor (α)",
     min_value=0.1,
     max_value=1.0,
     value=1.0,
@@ -115,6 +125,7 @@ max_load_factor = st.sidebar.slider(
 # --- Apply Filters ---
 df_filtered = df[
     (df['Metric_Type'] == selected_metric_type) &
+    (df['Scale'] == scale_filter) &
     (df['Distribution'].isin(selected_distributions)) &
     (df['Technique'].isin(selected_techniques)) &
     (df['Load_Factor'] <= max_load_factor)
@@ -122,11 +133,11 @@ df_filtered = df[
 
 
 # --- Main App Title and Layout ---
-st.title(" Dynamic Hash Table Analyzer")
+st.title("🔢 Dynamic Hash Table Analyzer")
 st.markdown("Visualize collision resolution performance under varying load factors and data distributions.")
 
-st.subheader(f"{selected_metric_type} vs. Load Factor (α)")
-st.write("This chart shows the cumulative cost of insertion up to the given Load Factor. Higher values indicate worse performance.")
+st.subheader(f"{selected_metric_type} vs. Load Factor (α) - {scale_filter} Scale")
+st.write("The Y-axis shows the **cumulative total** cost of all insertions up to the given Load Factor.")
 
 col1, col2 = st.columns([1, 4])
 
@@ -138,18 +149,21 @@ with col1:
         horizontal=True,
         key='y_scale_selector'
     )
-    y_axis_type = 'log' if y_scale == 'Logarithmic' else 'linear'
+    y_axis_type = 'log' if y_scale == 'Logarithmic' and selected_metric_type == 'Total Probes' else 'linear'
 
     # Single-Key Index Selector (for focused analysis)
-    max_key_index = int(df['Key_Index'].max())
-    key_index = st.slider(
-        "Highlight Specific Key Index",
-        min_value=1,
-        max_value=max_key_index,
-        value=6,
-        step=1,
-        help="Focuses the chart on the insertion step corresponding to this Key Index (for micro-analysis)."
-    )
+    max_key_index = int(df_filtered['Key_Index'].max())
+    if max_key_index > 1:
+        key_index = st.slider(
+            "Highlight Key Insertion Index",
+            min_value=1,
+            max_value=max_key_index,
+            value=max_key_index if max_key_index < 10 else 6,
+            step=1,
+            help="Focuses the chart on a specific insertion step for micro-analysis."
+        )
+    else:
+        key_index = 1
 
 with col2:
     # --- Plot Generation ---
@@ -187,7 +201,7 @@ with col2:
 
 # --- Raw Data Section ---
 if st.checkbox("Show Raw Data Table", value=False):
-    st.subheader("Raw Simulation Data (First 100 Rows)")
-    st.dataframe(df.head(100))
+    st.subheader(f"Raw Simulation Data ({scale_filter} Scale)")
+    st.dataframe(df_filtered)
 
 st.caption("Developed using C for simulation and Python/Streamlit for visualization.")
