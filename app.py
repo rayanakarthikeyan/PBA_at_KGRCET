@@ -12,10 +12,13 @@ ALL_COLS = ['Distribution', 'Load_Factor'] + PROBE_COLS + TIME_COLS
 def load_data():
     """Loads and reshapes the simulation data from the CSV file."""
     try:
-        # Load the CSV, ensuring only the expected columns are read
-        df = pd.read_csv('results_data.csv', usecols=ALL_COLS)
+        # **DEFINITIVE FIX:** Skip the header row and explicitly assign column names.
+        df = pd.read_csv('results_data.csv', 
+                         header=None, # Skip the header row entirely
+                         names=ALL_COLS, # Assign the correct column names
+                         skiprows=1) # Start reading from the second row (the data)
     except FileNotFoundError:
-        st.error("Error: 'results_data.csv' not found. Please ensure the C simulation has been run and the data file is present.")
+        st.error("Error: 'results_data.csv' not found. Please ensure the data file is present.")
         return pd.DataFrame()
     except Exception as e:
         st.error(f"Error loading CSV data: {e}")
@@ -24,7 +27,7 @@ def load_data():
     # 1. Melt/Reshape for Probes data
     df_probes = df.melt(
         id_vars=['Distribution', 'Load_Factor'],
-        value_vars=PROBE_COLS, # Use the explicit list
+        value_vars=PROBE_COLS, 
         var_name='Technique',
         value_name='Metric_Value'
     ).assign(Metric_Type='Average Probes')
@@ -32,7 +35,7 @@ def load_data():
     # 2. Melt/Reshape for Timing data (only for open addressing)
     df_timing = df.melt(
         id_vars=['Distribution', 'Load_Factor'],
-        value_vars=TIME_COLS, # Use the explicit list
+        value_vars=TIME_COLS, 
         var_name='Technique',
         value_name='Metric_Value'
     ).assign(Metric_Type='Insertion Time (ms)')
@@ -63,7 +66,6 @@ def create_plot(df, metric_type, title, y_axis_label, log_y=False):
     )
 
     if log_y:
-        # Log scale is useful for visualizing the huge difference at high load factors
         fig.update_yaxes(type="log", showgrid=True)
     
     return fig
@@ -81,7 +83,6 @@ if not df.empty:
     # --- Sidebar Filters ---
     st.sidebar.header("Analysis Filters")
     
-    # Allow filtering by distribution type
     all_distributions = df['Distribution'].unique()
     selected_distributions = st.sidebar.multiselect(
         "Select Data Distribution(s)",
@@ -89,7 +90,6 @@ if not df.empty:
         default=all_distributions
     )
     
-    # Filter by Load Factor range
     max_load_factor = st.sidebar.slider(
         "Select Max Load Factor (α)",
         min_value=0.1,
@@ -116,7 +116,6 @@ if not df.empty:
             
             df_probes_plot = filtered_df[filtered_df['Metric_Type'] == 'Average Probes']
             
-            # Allow user to switch between Linear and Log Y-axis for probes
             y_scale = st.radio("Y-Axis Scale (Probes)", ["Linear", "Logarithmic"], horizontal=True, key='probes_scale')
             
             fig_probes = create_plot(
@@ -134,7 +133,6 @@ if not df.empty:
 
             df_timing_plot = filtered_df[filtered_df['Metric_Type'] == 'Insertion Time (ms)']
             
-            # Filter out Chaining for timing, as we only timed Open Addressing techniques
             df_timing_plot = df_timing_plot[~df_timing_plot['Technique'].str.contains('Chaining')]
             
             fig_timing = create_plot(
