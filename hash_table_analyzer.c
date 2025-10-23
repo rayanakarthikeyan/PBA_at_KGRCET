@@ -1,257 +1,265 @@
-/*
- * Dynamic Hash Table Analyzer - C Core Simulation Engine (v2.0)
- *
- * Adds: Insertion Timing (Time_ms) and Worst-Case Key generation.
- *
- * To compile: gcc hash_table_analyzer.c -o analyzer -lm
- */
 #include <stdio.h>
 #include <stdlib.h>
-#include <time.h>
+#include <string.h>
 #include <math.h>
+#include <time.h>
 
-// --- Configuration ---
-#define TABLE_SIZE 10007 // A large prime number for the hash table size (M)
-#define MAX_INSERTIONS 15000 // Max number of keys to insert (N)
-#define STEP_SIZE 500 // Record metrics every STEP_SIZE insertions
-#define DOUBLE_HASH_R 10003 // Second prime number R < M for double hashing
+#define TABLE_SIZE 10000
+#define NUM_INSERTIONS TABLE_SIZE
+#define LOAD_FACTOR_STEPS 100
+#define STEP_SIZE (NUM_INSERTIONS / LOAD_FACTOR_STEPS)
 
 // --- Data Structures ---
+
+// 1. Separate Chaining Node
 typedef struct Node {
     int key;
     struct Node *next;
 } Node;
 
+// Hash Table for Chaining
+Node* chaining_table[TABLE_SIZE];
+
+// Hash Table for Probing (Open Addressing)
 #define EMPTY_SLOT -1
+int probing_table[TABLE_SIZE];
 
-typedef struct HashTable {
-    int table[TABLE_SIZE];
-    Node* chain_table[TABLE_SIZE];
-    int size;
-    double total_probes_chaining;
-    double total_probes_linear;
-    double total_probes_quadratic;
-    double total_probes_double;
-    clock_t total_time_linear; // New: Clock cycles for timing
-    clock_t total_time_quadratic;
-    clock_t total_time_double;
-} HashTable;
 
-// --- Hash Functions ---
+// --- Utility Functions ---
 
+// Basic Hash Function
 int hash1(int key) {
-    return abs(key) % TABLE_SIZE;
+    return key % TABLE_SIZE;
 }
 
+// Second Hash Function for Double Hashing (must be non-zero)
 int hash2(int key) {
-    return DOUBLE_HASH_R - (abs(key) % DOUBLE_HASH_R);
+    // A common choice: R - (key % R), where R is a prime slightly less than TABLE_SIZE
+    return 7 - (key % 7);
 }
 
-// --- Initialization ---
+// Function to generate keys that cause maximal clustering (Worst Case)
+int generate_worst_case_key(int index) {
+    // Generate keys that all map to the same small set of initial slots
+    // For example, keys that are multiples of 1000 + a small offset
+    return (index * 100) + (index % 5);
+}
 
-void init_hash_table(HashTable *ht) {
-    ht->size = 0;
-    ht->total_probes_chaining = 0.0;
-    ht->total_probes_linear = 0.0;
-    ht->total_probes_quadratic = 0.0;
-    ht->total_probes_double = 0.0;
-    ht->total_time_linear = 0;
-    ht->total_time_quadratic = 0;
-    ht->total_time_double = 0;
+// Function to generate skewed keys
+int generate_skewed_key(int index) {
+    // Generate keys that tend to cluster slightly
+    return (index * 7) + (rand() % 100);
+}
 
+// Function to generate uniform keys
+int generate_uniform_key(int index) {
+    // Pure random key
+    return rand() * index;
+}
+
+// Function to clear tables
+void initialize_tables() {
     for (int i = 0; i < TABLE_SIZE; i++) {
-        ht->table[i] = EMPTY_SLOT;
-        ht->chain_table[i] = NULL;
+        chaining_table[i] = NULL;
+        probing_table[i] = EMPTY_SLOT;
     }
 }
 
-// --- Collision Resolution Techniques (Insertion with Timing) ---
+// --- Collision Resolution Techniques (Return Probes) ---
 
-// 1. Separate Chaining (Timing generally less critical here)
-void insert_chaining(HashTable *ht, int key) {
+// 1. Separate Chaining
+long insert_chaining(int key) {
     int index = hash1(key);
-    int probes = 1;
+    long probes = 1; // Count the initial index access
+
     Node *newNode = (Node*)malloc(sizeof(Node));
-    if (newNode == NULL) { exit(EXIT_FAILURE); }
+    if (newNode == NULL) { return 0; } // Allocation failure
+
     newNode->key = key;
     newNode->next = NULL;
 
-    if (ht->chain_table[index] == NULL) {
-        ht->chain_table[index] = newNode;
+    if (chaining_table[index] == NULL) {
+        chaining_table[index] = newNode;
     } else {
-        Node *current = ht->chain_table[index];
+        Node *current = chaining_table[index];
         while (current->next != NULL) {
-            probes++;
             current = current->next;
+            probes++; // Count traversal of existing list
         }
-        probes++;
         current->next = newNode;
     }
-    ht->total_probes_chaining += probes;
+    return probes;
 }
 
 // 2. Linear Probing
-void insert_linear_probing(HashTable *ht, int key) {
-    clock_t start = clock();
-    int start_index = hash1(key);
-    int probes = 1;
+long insert_linear_probing(int key) {
+    int initial_index = hash1(key);
+    long probes = 0;
 
     for (int i = 0; i < TABLE_SIZE; i++) {
-        int index = (start_index + i) % TABLE_SIZE;
-        if (ht->table[index] == EMPTY_SLOT) {
-            ht->table[index] = key;
-            ht->total_probes_linear += probes;
-            ht->size++;
-            clock_t end = clock();
-            ht->total_time_linear += (end - start);
-            return;
-        }
         probes++;
+        int index = (initial_index + i) % TABLE_SIZE;
+
+        if (probing_table[index] == EMPTY_SLOT) {
+            probing_table[index] = key;
+            return probes;
+        }
+        // Optimization: If the key already exists, stop (though our sim only inserts)
     }
-    clock_t end = clock();
-    ht->total_time_linear += (end - start);
-    fprintf(stderr, "Error: Hash table overflow (Linear Probing).\n");
+    return probes; // Should not happen if TABLE_SIZE > NUM_INSERTIONS
 }
 
 // 3. Quadratic Probing
-void insert_quadratic_probing(HashTable *ht, int key) {
-    clock_t start = clock();
-    int start_index = hash1(key);
-    int probes = 1;
+long insert_quadratic_probing(int key) {
+    int initial_index = hash1(key);
+    long probes = 0;
 
     for (int i = 0; i < TABLE_SIZE; i++) {
-        // h(k, i) = (h(k) + i^2) mod M
-        int index = (start_index + (i * i)) % TABLE_SIZE;
-        if (ht->table[index] == EMPTY_SLOT) {
-            ht->table[index] = key;
-            ht->total_probes_quadratic += probes;
-            ht->size++;
-            clock_t end = clock();
-            ht->total_time_quadratic += (end - start);
-            return;
-        }
         probes++;
+        // Formula: h(k, i) = (h(k) + i^2) mod M
+        int index = (initial_index + i * i) % TABLE_SIZE;
+
+        if (probing_table[index] == EMPTY_SLOT) {
+            probing_table[index] = key;
+            return probes;
+        }
     }
-    clock_t end = clock();
-    ht->total_time_quadratic += (end - start);
-    fprintf(stderr, "Error: Hash table overflow (Quadratic Probing).\n");
+    return probes;
 }
 
 // 4. Double Hashing
-void insert_double_hashing(HashTable *ht, int key) {
-    clock_t start = clock();
-    int start_index = hash1(key);
+long insert_double_hashing(int key) {
+    int initial_index = hash1(key);
     int step = hash2(key);
-    int probes = 1;
+    long probes = 0;
 
     for (int i = 0; i < TABLE_SIZE; i++) {
-        int index = (start_index + i * step) % TABLE_SIZE;
-        if (ht->table[index] == EMPTY_SLOT) {
-            ht->table[index] = key;
-            ht->total_probes_double += probes;
-            ht->size++;
-            clock_t end = clock();
-            ht->total_time_double += (end - start);
-            return;
-        }
         probes++;
+        // Formula: h(k, i) = (h1(k) + i * h2(k)) mod M
+        int index = (initial_index + i * step) % TABLE_SIZE;
+
+        if (probing_table[index] == EMPTY_SLOT) {
+            probing_table[index] = key;
+            return probes;
+        }
     }
-    clock_t end = clock();
-    ht->total_time_double += (end - start);
-    fprintf(stderr, "Error: Hash table overflow (Double Hashing).\n");
-}
-
-// --- Key Generation ---
-
-int generate_uniform_key() {
-    return rand();
-}
-
-int generate_skewed_key() {
-    // Keys that hash to a small range, simulating realistic clustering
-    return (rand() % (TABLE_SIZE / 100)) * 100 + (rand() % 5);
-}
-
-int generate_worst_case_key() {
-    // Keys that all hash to the *exact* same primary index (e.g., index 100)
-    // This creates the absolute worst-case scenario, maximizing collision length.
-    return (rand() % 1000) * TABLE_SIZE + 100;
+    return probes;
 }
 
 // --- Simulation Driver ---
 
-void run_simulation(const char* distribution_name, int (*key_generator)()) {
-    HashTable ht;
-    init_hash_table(&ht);
+void run_simulation(const char* distribution_name, int (*key_generator)(int)) {
+    // Total probes and time for all insertions in this run
+    long total_probes_chaining = 0;
+    long total_probes_lp = 0;
+    long total_probes_qp = 0;
+    long total_probes_dh = 0;
 
-    double keys_processed = 0;
+    clock_t start_time, end_time;
+    double total_time_chaining = 0.0;
+    double total_time_lp = 0.0;
+    double total_time_qp = 0.0;
+    double total_time_dh = 0.0;
 
-    for (int i = 1; i <= MAX_INSERTIONS; i++) {
-        int key = key_generator();
+    // Simulation loop
+    for (int i = 0; i < NUM_INSERTIONS; i++) {
+        int key = key_generator(i);
+        long probes;
+        double cpu_time_used;
 
-        insert_chaining(&ht, key);
+        // Only record data at set intervals (steps) or at the end
+        if (i % STEP_SIZE == 0 || i == NUM_INSERTIONS - 1 || i < 10) {
+            // --- Separate Chaining ---
+            start_time = clock();
+            probes = insert_chaining(key);
+            end_time = clock();
+            total_probes_chaining += probes;
+            cpu_time_used = ((double)(end_time - start_time)) / CLOCKS_PER_SEC;
+            total_time_chaining += cpu_time_used * 1000.0; // Convert to milliseconds
 
-        if ((double)ht.size < TABLE_SIZE * 0.95) {
-            insert_linear_probing(&ht, key);
-            ht.size = ht.size - 1;
-            insert_quadratic_probing(&ht, key);
-            ht.size = ht.size - 1;
-            insert_double_hashing(&ht, key);
-        }
+            // --- Linear Probing ---
+            start_time = clock();
+            probes = insert_linear_probing(key);
+            end_time = clock();
+            total_probes_lp += probes;
+            cpu_time_used = ((double)(end_time - start_time)) / CLOCKS_PER_SEC;
+            total_time_lp += cpu_time_used * 1000.0;
 
-        keys_processed++;
+            // --- Quadratic Probing ---
+            start_time = clock();
+            probes = insert_quadratic_probing(key);
+            end_time = clock();
+            total_probes_qp += probes;
+            cpu_time_used = ((double)(end_time - start_time)) / CLOCKS_PER_SEC;
+            total_time_qp += cpu_time_used * 1000.0;
 
-        if ((int)keys_processed % STEP_SIZE == 0 && keys_processed > 0) {
-            double load_factor = keys_processed / TABLE_SIZE;
-            double num_keys = keys_processed;
+            // --- Double Hashing ---
+            start_time = clock();
+            probes = insert_double_hashing(key);
+            end_time = clock();
+            total_probes_dh += probes;
+            cpu_time_used = ((double)(end_time - start_time)) / CLOCKS_PER_SEC;
+            total_time_dh += cpu_time_used * 1000.0;
 
-            // Average Probe Calculations
-            double avg_probes_chaining = ht.total_probes_chaining / num_keys;
-            double avg_probes_linear = ht.total_probes_linear / num_keys;
-            double avg_probes_quadratic = ht.total_probes_quadratic / num_keys;
-            double avg_probes_double = ht.total_probes_double / num_keys;
+            // Calculate Load Factor after i+1 insertions
+            double load_factor = (double)(i + 1) / TABLE_SIZE;
 
-            // New: Average Time Calculations (Convert clock cycles to milliseconds)
-            double avg_time_linear = ((double)ht.total_time_linear / num_keys) * 1000.0 / CLOCKS_PER_SEC;
-            double avg_time_quadratic = ((double)ht.total_time_quadratic / num_keys) * 1000.0 / CLOCKS_PER_SEC;
-            double avg_time_double = ((double)ht.total_time_double / num_keys) * 1000.0 / CLOCKS_PER_SEC;
-
-            // Print CSV row to stdout
-            printf("%s,%.4f,%.4f,%.4f,%.4f,%.4f,%.8f,%.8f,%.8f\n",
-                   distribution_name,
+            // Print output in CSV format to stdout
+            printf("%d,%.6f,%s,%ld,%ld,%ld,%ld,%.6f,%.6f,%.6f,%.6f\n",
+                   i + 1, // Key_Index (Number of keys inserted)
                    load_factor,
-                   avg_probes_chaining,
-                   avg_probes_linear,
-                   avg_probes_quadratic,
-                   avg_probes_double,
-                   avg_time_linear,
-                   avg_time_quadratic,
-                   avg_time_double);
+                   distribution_name,
+                   total_probes_chaining,
+                   total_probes_lp,
+                   total_probes_qp,
+                   total_probes_dh,
+                   total_time_chaining,
+                   total_time_lp,
+                   total_time_qp,
+                   total_time_dh
+            );
+        } else {
+            // Perform insertion without printing results to keep total time accurate
+            total_probes_chaining += insert_chaining(key);
+            total_probes_lp += insert_linear_probing(key);
+            total_probes_qp += insert_quadratic_probing(key);
+            total_probes_dh += insert_double_hashing(key);
         }
     }
 }
 
-// --- Main ---
-
-int main() {
-    srand(time(NULL));
-
-    // UPDATED CSV HEADER: Added Time_ms metrics
-    printf("Distribution,Load_Factor,Chaining_Probes,Linear_Probing_Probes,Quadratic_Probing_Probes,Double_Hashing_Probes,Linear_Time_ms,Quadratic_Time_ms,Double_Time_ms\n");
-
-    // 1. Uniform Keys
-    fprintf(stderr, "Running simulation for Uniform Keys...\n");
-    run_simulation("Uniform", generate_uniform_key);
-
-    // 2. Skewed Keys (Clustering)
-    fprintf(stderr, "Running simulation for Skewed (Clustering) Keys...\n");
-    run_simulation("Skewed", generate_skewed_key);
-
-    // 3. Worst-Case Keys
-    fprintf(stderr, "Running simulation for Worst_Case Keys (Max Collisions)...\n");
-    run_simulation("Worst_Case", generate_worst_case_key);
-
-    fprintf(stderr, "Simulation complete. Data written to stdout.\n");
-    return 0;
+void cleanup_chaining_table() {
+    for (int i = 0; i < TABLE_SIZE; i++) {
+        Node *current = chaining_table[i];
+        while (current != NULL) {
+            Node *temp = current;
+            current = current->next;
+            free(temp);
+        }
+    }
 }
 
+int main() {
+    // Seed the random number generator
+    srand(time(NULL));
+
+    // Print CSV Header
+    printf("Key_Index,Load_Factor,Distribution,Chaining_Probes,Linear_Probing_Probes,Quadratic_Probing_Probes,Double_Hashing_Probes,Chaining_Time_ms,Linear_Probing_Time_ms,Quadratic_Probing_Time_ms,Double_Hashing_Time_ms\n");
+
+    // --- Run 1: Uniform Distribution (Best Case) ---
+    initialize_tables();
+    run_simulation("Uniform", generate_uniform_key);
+    cleanup_chaining_table();
+
+    // --- Run 2: Skewed Distribution (Clustering) ---
+    initialize_tables();
+    run_simulation("Skewed", generate_skewed_key);
+    cleanup_chaining_table();
+
+    // --- Run 3: Worst Case Distribution (Maximum Collisions) ---
+    initialize_tables();
+    run_simulation("Worst_Case", generate_worst_case_key);
+    cleanup_chaining_table();
+
+    return 0;
+}
