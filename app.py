@@ -73,7 +73,7 @@ def create_plot(df, metric_type, title, y_axis_label, log_y=False):
 # --- Main Streamlit App ---
 st.set_page_config(layout="wide", page_title="Dynamic Hash Table Analyzer")
 
-st.title("🔢 Dynamic Hash Table Analyzer")
+st.title(" Dynamic Hash Table Analyzer")
 st.markdown("Visualize collision resolution performance under varying load factors and data distributions.")
 
 df = load_data()
