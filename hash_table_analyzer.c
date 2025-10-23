@@ -6,6 +6,9 @@
 
 #define TABLE_SIZE 10000
 #define NUM_INSERTIONS TABLE_SIZE
+#define MICRO_SIZE 10
+#define MICRO_TABLE_SIZE 13 // Small prime size for micro-analysis
+
 #define LOAD_FACTOR_STEPS 100
 #define STEP_SIZE (NUM_INSERTIONS / LOAD_FACTOR_STEPS)
 
@@ -17,74 +20,91 @@ typedef struct Node {
     struct Node *next;
 } Node;
 
-// Hash Table for Chaining
-Node* chaining_table[TABLE_SIZE];
+// Hash Table arrays (dynamically sized based on run context)
+Node** chaining_table_ptr;
+int* probing_table_ptr;
+int current_table_size;
 
-// Hash Table for Probing (Open Addressing)
 #define EMPTY_SLOT -1
-int probing_table[TABLE_SIZE];
-
 
 // --- Utility Functions ---
 
 // Basic Hash Function
 int hash1(int key) {
-    return key % TABLE_SIZE;
+    return key % current_table_size;
 }
 
-// Second Hash Function for Double Hashing (must be non-zero)
+// Second Hash Function for Double Hashing
 int hash2(int key) {
-    // A common choice: R - (key % R), where R is a prime slightly less than TABLE_SIZE
     return 7 - (key % 7);
 }
 
-// Function to generate keys that cause maximal clustering (Worst Case)
+// Key Generation Functions (remain the same)
 int generate_worst_case_key(int index) {
     // Generate keys that all map to the same small set of initial slots
-    // For example, keys that are multiples of 1000 + a small offset
     return (index * 100) + (index % 5);
 }
 
-// Function to generate skewed keys
 int generate_skewed_key(int index) {
     // Generate keys that tend to cluster slightly
     return (index * 7) + (rand() % 100);
 }
 
-// Function to generate uniform keys
 int generate_uniform_key(int index) {
     // Pure random key
     return rand() * index;
 }
 
-// Function to clear tables
-void initialize_tables() {
-    for (int i = 0; i < TABLE_SIZE; i++) {
-        chaining_table[i] = NULL;
-        probing_table[i] = EMPTY_SLOT;
+void initialize_tables(int size) {
+    current_table_size = size;
+    chaining_table_ptr = (Node**)malloc(sizeof(Node*) * size);
+    probing_table_ptr = (int*)malloc(sizeof(int) * size);
+    
+    if (chaining_table_ptr == NULL || probing_table_ptr == NULL) {
+        fprintf(stderr, "Memory allocation failed.\n");
+        exit(1);
+    }
+
+    for (int i = 0; i < size; i++) {
+        chaining_table_ptr[i] = NULL;
+        probing_table_ptr[i] = EMPTY_SLOT;
     }
 }
+
+void cleanup_tables(int size) {
+    for (int i = 0; i < size; i++) {
+        Node *current = chaining_table_ptr[i];
+        while (current != NULL) {
+            Node *temp = current;
+            current = current->next;
+            free(temp);
+        }
+    }
+    free(chaining_table_ptr);
+    free(probing_table_ptr);
+}
+
 
 // --- Collision Resolution Techniques (Return Probes) ---
 
 // 1. Separate Chaining
 long insert_chaining(int key) {
     int index = hash1(key);
-    long probes = 1; // Count the initial index access
+    long probes = 1;
 
     Node *newNode = (Node*)malloc(sizeof(Node));
-    if (newNode == NULL) { return 0; } // Allocation failure
+    if (newNode == NULL) { return 0; }
 
     newNode->key = key;
     newNode->next = NULL;
 
-    if (chaining_table[index] == NULL) {
-        chaining_table[index] = newNode;
+    if (chaining_table_ptr[index] == NULL) {
+        chaining_table_ptr[index] = newNode;
     } else {
-        Node *current = chaining_table[index];
+        Node *current = chaining_table_ptr[index];
         while (current->next != NULL) {
             current = current->next;
-            probes++; // Count traversal of existing list
+            probes++;
         }
         current->next = newNode;
     }
@@ -96,17 +116,16 @@ long insert_linear_probing(int key) {
     int initial_index = hash1(key);
     long probes = 0;
 
-    for (int i = 0; i < TABLE_SIZE; i++) {
+    for (int i = 0; i < current_table_size; i++) {
         probes++;
-        int index = (initial_index + i) % TABLE_SIZE;
+        int index = (initial_index + i) % current_table_size;
 
-        if (probing_table[index] == EMPTY_SLOT) {
-            probing_table[index] = key;
+        if (probing_table_ptr[index] == EMPTY_SLOT) {
+            probing_table_ptr[index] = key;
             return probes;
         }
-        // Optimization: If the key already exists, stop (though our sim only inserts)
     }
-    return probes; // Should not happen if TABLE_SIZE > NUM_INSERTIONS
+    return probes;
 }
 
 // 3. Quadratic Probing
@@ -114,13 +133,12 @@ long insert_quadratic_probing(int key) {
     int initial_index = hash1(key);
     long probes = 0;
 
-    for (int i = 0; i < TABLE_SIZE; i++) {
+    for (int i = 0; i < current_table_size; i++) {
         probes++;
-        // Formula: h(k, i) = (h(k) + i^2) mod M
-        int index = (initial_index + i * i) % TABLE_SIZE;
+        int index = (initial_index + i * i) % current_table_size;
 
-        if (probing_table[index] == EMPTY_SLOT) {
-            probing_table[index] = key;
+        if (probing_table_ptr[index] == EMPTY_SLOT) {
+            probing_table_ptr[index] = key;
             return probes;
         }
     }
@@ -133,13 +151,12 @@ long insert_double_hashing(int key) {
     int step = hash2(key);
     long probes = 0;
 
-    for (int i = 0; i < TABLE_SIZE; i++) {
+    for (int i = 0; i < current_table_size; i++) {
         probes++;
-        // Formula: h(k, i) = (h1(k) + i * h2(k)) mod M
-        int index = (initial_index + i * step) % TABLE_SIZE;
+        int index = (initial_index + i * step) % current_table_size;
 
-        if (probing_table[index] == EMPTY_SLOT) {
-            probing_table[index] = key;
+        if (probing_table_ptr[index] == EMPTY_SLOT) {
+            probing_table_ptr[index] = key;
             return probes;
         }
     }
@@ -148,8 +165,10 @@ long insert_double_hashing(int key) {
 
 // --- Simulation Driver ---
 
-void run_simulation(const char* distribution_name, int (*key_generator)(int)) {
-    // Total probes and time for all insertions in this run
+void run_simulation(const char* scale_name, const char* distribution_name, int (*key_generator)(int), int num_keys, int table_size) {
+    
+    initialize_tables(table_size);
+
     long total_probes_chaining = 0;
     long total_probes_lp = 0;
     long total_probes_qp = 0;
@@ -161,21 +180,22 @@ void run_simulation(const char* distribution_name, int (*key_generator)(int)) {
     double total_time_qp = 0.0;
     double total_time_dh = 0.0;
 
-    // Simulation loop
-    for (int i = 0; i < NUM_INSERTIONS; i++) {
+    int print_step = (num_keys > 50) ? (num_keys / LOAD_FACTOR_STEPS) : 1;
+    if (num_keys <= MICRO_SIZE) { print_step = 1; }
+
+    for (int i = 0; i < num_keys; i++) {
         int key = key_generator(i);
         long probes;
         double cpu_time_used;
 
-        // Only record data at set intervals (steps) or at the end
-        if (i % STEP_SIZE == 0 || i == NUM_INSERTIONS - 1 || i < 10) {
+        if (i % print_step == 0 || i == num_keys - 1 || i < MICRO_SIZE) {
             // --- Separate Chaining ---
             start_time = clock();
             probes = insert_chaining(key);
             end_time = clock();
             total_probes_chaining += probes;
             cpu_time_used = ((double)(end_time - start_time)) / CLOCKS_PER_SEC;
-            total_time_chaining += cpu_time_used * 1000.0; // Convert to milliseconds
+            total_time_chaining += cpu_time_used * 1000.0; // ms
 
             // --- Linear Probing ---
             start_time = clock();
@@ -201,13 +221,13 @@ void run_simulation(const char* distribution_name, int (*key_generator)(int)) {
             cpu_time_used = ((double)(end_time - start_time)) / CLOCKS_PER_SEC;
             total_time_dh += cpu_time_used * 1000.0;
 
-            // Calculate Load Factor after i+1 insertions
-            double load_factor = (double)(i + 1) / TABLE_SIZE;
+            double load_factor = (double)(i + 1) / table_size;
 
-            // Print output in CSV format to stdout
-            printf("%d,%.6f,%s,%ld,%ld,%ld,%ld,%.6f,%.6f,%.6f,%.6f\n",
-                   i + 1, // Key_Index (Number of keys inserted)
+            // Print output in CSV format
+            printf("%d,%.6f,%s,%s,%ld,%ld,%ld,%ld,%.6f,%.6f,%.6f,%.6f\n",
+                   i + 1, // Key_Index
                    load_factor,
+                   scale_name,
                    distribution_name,
                    total_probes_chaining,
                    total_probes_lp,
@@ -219,47 +239,31 @@ void run_simulation(const char* distribution_name, int (*key_generator)(int)) {
                    total_time_dh
             );
         } else {
-            // Perform insertion without printing results to keep total time accurate
+            // Insert without printing to keep metrics accurate
             total_probes_chaining += insert_chaining(key);
             total_probes_lp += insert_linear_probing(key);
             total_probes_qp += insert_quadratic_probing(key);
             total_probes_dh += insert_double_hashing(key);
         }
     }
-}
-
-void cleanup_chaining_table() {
-    for (int i = 0; i < TABLE_SIZE; i++) {
-        Node *current = chaining_table[i];
-        while (current != NULL) {
-            Node *temp = current;
-            current = current->next;
-            free(temp);
-        }
-    }
+    cleanup_tables(table_size);
 }
 
 int main() {
-    // Seed the random number generator
     srand(time(NULL));
 
     // Print CSV Header
-    printf("Key_Index,Load_Factor,Distribution,Chaining_Probes,Linear_Probing_Probes,Quadratic_Probing_Probes,Double_Hashing_Probes,Chaining_Time_ms,Linear_Probing_Time_ms,Quadratic_Probing_Time_ms,Double_Hashing_Time_ms\n");
+    printf("Key_Index,Load_Factor,Scale,Distribution,Chaining_Probes,Linear_Probing_Probes,Quadratic_Probing_Probes,Double_Hashing_Probes,Chaining_Time_ms,Linear_Probing_Time_ms,Quadratic_Probing_Time_ms,Double_Hashing_Time_ms\n");
 
-    // --- Run 1: Uniform Distribution (Best Case) ---
-    initialize_tables();
-    run_simulation("Uniform", generate_uniform_key);
-    cleanup_chaining_table();
+    // --- 1. Micro-Scale Simulations (10 Keys) ---
+    run_simulation("Micro", "Uniform", generate_uniform_key, MICRO_SIZE, MICRO_TABLE_SIZE);
+    run_simulation("Micro", "Skewed", generate_skewed_key, MICRO_SIZE, MICRO_TABLE_SIZE);
+    run_simulation("Micro", "Worst_Case", generate_worst_case_key, MICRO_SIZE, MICRO_TABLE_SIZE);
 
-    // --- Run 2: Skewed Distribution (Clustering) ---
-    initialize_tables();
-    run_simulation("Skewed", generate_skewed_key);
-    cleanup_chaining_table();
-
-    // --- Run 3: Worst Case Distribution (Maximum Collisions) ---
-    initialize_tables();
-    run_simulation("Worst_Case", generate_worst_case_key);
-    cleanup_chaining_table();
+    // --- 2. Macro-Scale Simulations (10,000 Keys) ---
+    run_simulation("Macro", "Uniform", generate_uniform_key, NUM_INSERTIONS, TABLE_SIZE);
+    run_simulation("Macro", "Skewed", generate_skewed_key, NUM_INSERTIONS, TABLE_SIZE);
+    run_simulation("Macro", "Worst_Case", generate_worst_case_key, NUM_INSERTIONS, TABLE_SIZE);
 
     return 0;
 }
