@@ -133,7 +133,7 @@ df_filtered = df[
 
 
 # --- Main App Title and Layout ---
-st.title("🔢 Dynamic Hash Table Analyzer")
+st.title(" Dynamic Hash Table Analyzer")
 st.markdown("Visualize collision resolution performance under varying load factors and data distributions.")
 
 st.subheader(f"{selected_metric_type} vs. Load Factor (α) - {scale_filter} Scale")
