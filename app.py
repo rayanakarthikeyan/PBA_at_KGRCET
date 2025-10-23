@@ -1,150 +1,193 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
+import numpy as np
 
-# --- Configuration Constants for Robustness ---
-# Explicitly define the column names expected from the CSV output
-PROBE_COLS = ['Chaining_Probes', 'Linear_Probing_Probes', 'Quadratic_Probing_Probes', 'Double_Hashing_Probes']
-TIME_COLS = ['Linear_Time_ms', 'Quadratic_Time_ms', 'Double_Time_ms']
-ALL_COLS = ['Distribution', 'Load_Factor'] + PROBE_COLS + TIME_COLS
+# --- Configuration ---
+st.set_page_config(layout="wide", page_title="Dynamic Hash Table Analyzer")
+
+# Column Definitions for robust CSV loading
+ALL_COLS = [
+    'Key_Index', 'Load_Factor', 'Distribution',
+    'Chaining_Probes', 'Linear_Probing_Probes', 'Quadratic_Probing_Probes', 'Double_Hashing_Probes',
+    'Chaining_Time_ms', 'Linear_Probing_Time_ms', 'Quadratic_Probing_Time_ms', 'Double_Hashing_Time_ms'
+]
+
+PROBE_COLS = [
+    'Chaining_Probes', 'Linear_Probing_Probes', 'Quadratic_Probing_Probes', 'Double_Hashing_Probes'
+]
+
+TIME_COLS = [
+    'Chaining_Time_ms', 'Linear_Probing_Time_ms', 'Quadratic_Probing_Time_ms', 'Double_Hashing_Time_ms'
+]
+
+# Mapping technique names for display
+TECHNIQUE_MAP = {
+    'Chaining_Probes': 'Separate Chaining',
+    'Linear_Probing_Probes': 'Linear Probing',
+    'Quadratic_Probing_Probes': 'Quadratic Probing',
+    'Double_Hashing_Probes': 'Double Hashing',
+    'Chaining_Time_ms': 'Separate Chaining',
+    'Linear_Probing_Time_ms': 'Linear Probing',
+    'Quadratic_Probing_Time_ms': 'Quadratic Probing',
+    'Double_Hashing_Time_ms': 'Double Hashing',
+}
 
 @st.cache_data
 def load_data():
-    """Loads and reshapes the simulation data from the CSV file."""
+    """Loads and reshapes the CSV data into a long format for plotting."""
     try:
-        # **DEFINITIVE FIX:** Skip the header row and explicitly assign column names.
-        df = pd.read_csv('results_data.csv', 
-                         header=None, # Skip the header row entirely
-                         names=ALL_COLS, # Assign the correct column names
-                         skiprows=1) # Start reading from the second row (the data)
-    except FileNotFoundError:
-        st.error("Error: 'results_data.csv' not found. Please ensure the data file is present.")
-        return pd.DataFrame()
+        # Load data, skipping header and assigning column names explicitly
+        df = pd.read_csv(
+            'results_data.csv',
+            header=None,
+            names=ALL_COLS,
+            skiprows=1  # Skip the first row (the original header)
+        )
     except Exception as e:
         st.error(f"Error loading CSV data: {e}")
-        return pd.DataFrame()
+        st.stop()
 
-    # 1. Melt/Reshape for Probes data
+    # --- Reshape Probe Data ---
     df_probes = df.melt(
-        id_vars=['Distribution', 'Load_Factor'],
-        value_vars=PROBE_COLS, 
-        var_name='Technique',
+        id_vars=['Distribution', 'Load_Factor', 'Key_Index'],
+        value_vars=PROBE_COLS,
+        var_name='Technique_Raw',
         value_name='Metric_Value'
-    ).assign(Metric_Type='Average Probes')
+    ).assign(Metric_Type='Total Probes')
 
-    # 2. Melt/Reshape for Timing data (only for open addressing)
-    df_timing = df.melt(
-        id_vars=['Distribution', 'Load_Factor'],
-        value_vars=TIME_COLS, 
-        var_name='Technique',
+    # --- Reshape Timing Data ---
+    df_time = df.melt(
+        id_vars=['Distribution', 'Load_Factor', 'Key_Index'],
+        value_vars=TIME_COLS,
+        var_name='Technique_Raw',
         value_name='Metric_Value'
     ).assign(Metric_Type='Insertion Time (ms)')
 
-    # Combine reshaped dataframes
-    combined_df = pd.concat([df_probes, df_timing])
-    return combined_df
+    # Combine data frames
+    df_long = pd.concat([df_probes, df_time], ignore_index=True)
 
-def create_plot(df, metric_type, title, y_axis_label, log_y=False):
-    """Creates a Plotly line chart."""
+    # Clean up technique names
+    df_long['Technique'] = df_long['Technique_Raw'].map(lambda x: TECHNIQUE_MAP[x])
+    
+    return df_long
+
+df = load_data()
+
+
+# --- Sidebar Filtering Options ---
+
+st.sidebar.header("Analysis Filters")
+
+# Filter 1: Select Metric Type
+selected_metric_type = st.sidebar.radio(
+    "1. Select Analysis Type",
+    ('Total Probes', 'Insertion Time (ms)'),
+    horizontal=True
+)
+
+# Filter 2: Select Distribution
+available_distributions = df['Distribution'].unique()
+selected_distributions = st.sidebar.multiselect(
+    "2. Select Data Distribution(s)",
+    available_distributions,
+    default=available_distributions
+)
+
+# Filter 3: Select Technique
+available_techniques = df['Technique'].unique()
+selected_techniques = st.sidebar.multiselect(
+    "3. Select Collision Technique(s)",
+    available_techniques,
+    default=available_techniques
+)
+
+# Filter 4: Load Factor Range
+max_load_factor = st.sidebar.slider(
+    "4. Max Load Factor (α)",
+    min_value=0.1,
+    max_value=1.0,
+    value=1.0,
+    step=0.05,
+    help="Filter the analysis up to this load factor."
+)
+
+# --- Apply Filters ---
+df_filtered = df[
+    (df['Metric_Type'] == selected_metric_type) &
+    (df['Distribution'].isin(selected_distributions)) &
+    (df['Technique'].isin(selected_techniques)) &
+    (df['Load_Factor'] <= max_load_factor)
+].copy()
+
+
+# --- Main App Title and Layout ---
+st.title("🔢 Dynamic Hash Table Analyzer")
+st.markdown("Visualize collision resolution performance under varying load factors and data distributions.")
+
+st.subheader(f"{selected_metric_type} vs. Load Factor (α)")
+st.write("This chart shows the cumulative cost of insertion up to the given Load Factor. Higher values indicate worse performance.")
+
+col1, col2 = st.columns([1, 4])
+
+with col1:
+    # Y-Axis Scale Selector
+    y_scale = st.radio(
+        "Y-Axis Scale",
+        ('Linear', 'Logarithmic'),
+        horizontal=True,
+        key='y_scale_selector'
+    )
+    y_axis_type = 'log' if y_scale == 'Logarithmic' else 'linear'
+
+    # Single-Key Index Selector (for focused analysis)
+    max_key_index = int(df['Key_Index'].max())
+    key_index = st.slider(
+        "Highlight Specific Key Index",
+        min_value=1,
+        max_value=max_key_index,
+        value=6,
+        step=1,
+        help="Focuses the chart on the insertion step corresponding to this Key Index (for micro-analysis)."
+    )
+
+with col2:
+    # --- Plot Generation ---
+    title = f"Collision Resolution Performance: {selected_metric_type} vs. Load Factor"
+    y_label = selected_metric_type
+    
+    # Create the figure
     fig = px.line(
-        df,
+        df_filtered,
         x='Load_Factor',
         y='Metric_Value',
         color='Technique',
         line_dash='Distribution',
         title=title,
-        template='plotly_dark'
-    )
-    
-    # Customize layout
-    fig.update_layout(
-        xaxis_title="Load Factor (α)",
-        yaxis_title=y_axis_label,
-        legend_title="Resolution Technique",
-        hovermode="x unified",
-        margin=dict(l=20, r=20, t=50, b=20)
+        labels={'Metric_Value': y_label, 'Load_Factor': 'Load Factor (α)'},
+        height=600
     )
 
-    if log_y:
-        fig.update_yaxes(type="log", showgrid=True)
-    
-    return fig
+    # Set Y-axis scale based on user selection
+    fig.update_yaxes(type=y_axis_type)
 
-# --- Main Streamlit App ---
-st.set_page_config(layout="wide", page_title="Dynamic Hash Table Analyzer")
+    # Highlight a specific insertion point (Key_Index)
+    if key_index in df_filtered['Key_Index'].values:
+        df_key = df_filtered[df_filtered['Key_Index'] == key_index]
+        fig.add_scatter(
+            x=df_key['Load_Factor'],
+            y=df_key['Metric_Value'],
+            mode='markers',
+            marker=dict(size=12, symbol='star', line=dict(width=2, color='Red')),
+            name=f'Key Index {key_index}',
+            showlegend=False
+        )
 
-st.title(" Dynamic Hash Table Analyzer")
-st.markdown("Visualize collision resolution performance under varying load factors and data distributions.")
+    st.plotly_chart(fig, use_container_width=True)
 
-df = load_data()
+# --- Raw Data Section ---
+if st.checkbox("Show Raw Data Table", value=False):
+    st.subheader("Raw Simulation Data (First 100 Rows)")
+    st.dataframe(df.head(100))
 
-if not df.empty:
-    
-    # --- Sidebar Filters ---
-    st.sidebar.header("Analysis Filters")
-    
-    all_distributions = df['Distribution'].unique()
-    selected_distributions = st.sidebar.multiselect(
-        "Select Data Distribution(s)",
-        options=all_distributions,
-        default=all_distributions
-    )
-    
-    max_load_factor = st.sidebar.slider(
-        "Select Max Load Factor (α)",
-        min_value=0.1,
-        max_value=1.0,
-        value=1.0,
-        step=0.05
-    )
-    
-    # Apply filters
-    filtered_df = df[
-        (df['Distribution'].isin(selected_distributions)) &
-        (df['Load_Factor'] <= max_load_factor)
-    ]
-    
-    if filtered_df.empty:
-        st.warning("Please select at least one distribution and a valid load factor range.")
-    else:
-        # --- Tabbed Interface for Metrics ---
-        tab_probes, tab_timing = st.tabs(["📊 Average Probes Analysis", "⏱️ Insertion Timing Analysis"])
-
-        with tab_probes:
-            st.header("Average Probes per Insertion")
-            st.markdown("This chart shows the mean number of accesses (probes) required to insert a key. Lower is better.")
-            
-            df_probes_plot = filtered_df[filtered_df['Metric_Type'] == 'Average Probes']
-            
-            y_scale = st.radio("Y-Axis Scale (Probes)", ["Linear", "Logarithmic"], horizontal=True, key='probes_scale')
-            
-            fig_probes = create_plot(
-                df_probes_plot,
-                'Average Probes',
-                "Collision Resolution Performance: Probes vs. Load Factor",
-                "Average Probes",
-                log_y=(y_scale == "Logarithmic")
-            )
-            st.plotly_chart(fig_probes, use_container_width=True)
-
-        with tab_timing:
-            st.header("Insertion CPU Time")
-            st.markdown("This chart shows the actual CPU time spent during the insertion process (ms).")
-
-            df_timing_plot = filtered_df[filtered_df['Metric_Type'] == 'Insertion Time (ms)']
-            
-            df_timing_plot = df_timing_plot[~df_timing_plot['Technique'].str.contains('Chaining')]
-            
-            fig_timing = create_plot(
-                df_timing_plot,
-                'Insertion Time (ms)',
-                "Insertion Time vs. Load Factor (Open Addressing Only)",
-                "CPU Time (ms)",
-                log_y=False
-            )
-            st.plotly_chart(fig_timing, use_container_width=True)
-
-        # Optional: Show raw data table
-        if st.checkbox('Show Raw Data Table'):
-            st.subheader("Raw Simulation Data")
-            st.dataframe(filtered_df.sort_values(by=['Distribution', 'Load_Factor']), use_container_width=True)
+st.caption("Developed using C for simulation and Python/Streamlit for visualization.")
