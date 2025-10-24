@@ -82,9 +82,9 @@ st.sidebar.header("Analysis Filters")
 # Filter 0: Scale Selector (NEW)
 selected_scale = st.sidebar.radio(
     "1. Select Simulation Scale",
-    ('Macro (10k keys)', 'Micro (≤10 keys)'),
+    ('Micro (≤10 keys)'),
     horizontal=True,
-    help="Macro scale shows real-world performance; Micro scale shows single-key collision effects."
+    help=" Micro scale shows single-key collision effects."
 )
 scale_filter = 'Macro' if 'Macro' in selected_scale else 'Micro'
 
